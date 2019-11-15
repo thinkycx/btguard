@@ -8,7 +8,7 @@
         LD_PRELOAD=./btguard.so ./program 
  * Test:
  *      comment dlopen dlsym functions.. and 
- *      gcc btguard.c -o btguard
+ *      gcc btguard.c -o btguard -ldl
         MODE=0 ./btguard    // COMPLAIN mode, output: ./bt-canary.txt
         MODE=1 ./btguard    // RESTRICT mode, use the ./bt-canary.txt
  
@@ -65,10 +65,11 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     memset(buffer, 0, BT_BUF_SIZE*sizeof(void *));
     backtrace((void *)buffer, BT_BUF_SIZE);
     sprintf(log_filename, "%s/%s", pwd, "bt-canary.txt");
+    printf("filename %s\n", log_filename);
     
 
     //get bt canary
-    int fd = open(log_filename, O_CREAT | O_RDWR | O_APPEND);
+    int fd = open(log_filename, O_CREAT | O_RDWR | O_APPEND, S_IRWXU); // 00700 user (file owner) has read, write, and execute permissions
     long long bt_canary_array[MAX_BT_CANARY_NUM] = {0};
     int filesize;
     filesize = get_file_size(log_filename);
@@ -93,13 +94,6 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     if (env_mode != 0 && env_mode != 1) //default set to COMPLAIN 0
         env_mode = 0;
 
-    // if( ! strcmp((const char*)env_mode, "COMPLAIN")){
-    //     goto COMPLAIN;
-    // }else if( ! strcmp((const char*)env_mode, "STRICT") ){
-    //     goto STRICT;
-    // }
-
-
     // make sure: 
     //          write into the file if the bt_canary is unique
     for(int i=0; bt_canary_array[i] != 0; i++ ){
@@ -119,7 +113,6 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     }
 
 END:
-
     close(fd);
     old_execve(filename, argv, envp);
 
@@ -128,6 +121,11 @@ END:
 
 void main()
 {
-    execve("/bin/sh", NULL, NULL);
+    char *filename="/bin/sh";
+    char **argv;
+    char **env;
+    argv = NULL;
+    env = NULL;
+    execve(filename, argv, env);
 }
 
