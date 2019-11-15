@@ -8,20 +8,20 @@
         LD_PRELOAD=./btguard.so ./program 
  * Test:
  *      comment dlopen dlsym functions.. and 
- *      gcc btguard.c -o btguard -ldl
+        gcc btguard.c -o btguard -ldl
         MODE=0 ./btguard    // COMPLAIN mode, output: ./bt-canary.txt
         MODE=1 ./btguard    // RESTRICT mode, use the ./bt-canary.txt
  
  * */
 
 #include <stdio.h>
-#include <execinfo.h>
+#include <execinfo.h>   // backtrace()
 #include <fcntl.h>
 #include <stdlib.h>
-#include <sys/stat.h> // get file size
+#include <sys/stat.h>   // get_file_size()
 #include <string.h>
-#include <unistd.h>
-#include <dlfcn.h>
+#include <unistd.h>     // open() read() write()   
+#include <dlfcn.h>      // dlopen() dlsym()
 
 
 #define BT_BUF_SIZE 20
@@ -43,7 +43,7 @@ unsigned long get_file_size(const char *path)
 
 int execve(const char* filename, char *const argv[], char *const envp[])
 {
-    static void *handle = NULL;
+    static void *handle = NULL;                                         // hook execve function
     static EXECVE old_execve = NULL;
     if( !handle ){
         handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -51,7 +51,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     }
     printf("hack function invoked. s1=<%s> \n", filename);
     
-    char *pwd; 
+    char *pwd;                                                          // caculate the bt cannary                         
     long long buffer[BT_BUF_SIZE];
     long long bt_canary;
     char log_filename[255];
@@ -63,13 +63,13 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     pwd = getenv("PWD");
     // printf("pwd %s\n", getenv("PWD"));
     memset(buffer, 0, BT_BUF_SIZE*sizeof(void *));
-    backtrace((void *)buffer, BT_BUF_SIZE);
+    backtrace((void *)buffer, BT_BUF_SIZE);                              // backtrace
     sprintf(log_filename, "%s/%s", pwd, "bt-canary.txt");
     printf("filename %s\n", log_filename);
     
 
-    //get bt canary
-    int fd = open(log_filename, O_CREAT | O_RDWR | O_APPEND, S_IRWXU); // 00700 user (file owner) has read, write, and execute permissions
+    //get bt canary                                                    // create if not exists
+    int fd = open(log_filename, O_CREAT | O_RDWR | O_APPEND, S_IRWXU); // mode = 00700 ; user (file owner) has read, write, and execute permissions
     long long bt_canary_array[MAX_BT_CANARY_NUM] = {0};
     int filesize;
     filesize = get_file_size(log_filename);
@@ -77,12 +77,12 @@ int execve(const char* filename, char *const argv[], char *const envp[])
         printf("filesize is too long...\n");
         return -1;
     }
-    read(fd, bt_canary_array, filesize);
+    read(fd, bt_canary_array, filesize);                        // read the content from the file
     
     // sum backtrace
-    for(int i=0; i<BT_BUF_SIZE; i++){
-        printf("%p\n", (void *)buffer[i]);
-        buffer[i] = buffer[i] & 0xfff;
+    for(int i=0; i<BT_BUF_SIZE; i++){                           // get each addr in the backtrace
+        printf("%p\n", (void *)buffer[i]);                      
+        buffer[i] = buffer[i] & 0xfff;                          // get the last 3 bit
         // write(fd, &buffer[i], 8);
         bt_canary += buffer[i]; 
         if (buffer[i] == 0){
@@ -91,11 +91,10 @@ int execve(const char* filename, char *const argv[], char *const envp[])
         }
     }
 
-    if (env_mode != 0 && env_mode != 1) //default set to COMPLAIN 0
+    if (env_mode != 0 && env_mode != 1)                          //default set to COMPLAIN 0
         env_mode = 0;
 
-    // make sure: 
-    //          write into the file if the bt_canary is unique
+    // check whether the bt_canary is unique?
     for(int i=0; bt_canary_array[i] != 0; i++ ){
         if (bt_canary_array[i] == bt_canary){
             if( env_mode == 0 )
@@ -103,12 +102,12 @@ int execve(const char* filename, char *const argv[], char *const envp[])
             goto END;
         }
     }
-    // NOT EQUALS
+    // NOT EQUALS! get new bt_canary!
     if (env_mode == 0){
-        printf("New canary! write into the file...\n");
+        printf("New bt_canary! write into the file...\n");
         write(fd, &bt_canary, 8);
     }else if(env_mode == 1){
-        printf("New canary in restrict mode!\n");
+        printf("New bt_canary in restrict mode!\n");
         return -1;
     }
 
