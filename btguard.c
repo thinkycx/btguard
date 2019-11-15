@@ -9,17 +9,16 @@
  * Test:
  *      comment dlopen dlsym functions.. and 
         gcc btguard.c -o btguard -ldl
-        MODE=0 ./btguard    // COMPLAIN mode, output: ./bt-canary.txt
-        MODE=1 ./btguard    // RESTRICT mode, use the ./bt-canary.txt
+        MODE=0 ./btguard    // COMPLAIN mode, output: ./btgurad-btcanary.txt
+        MODE=1 ./btguard    // RESTRICT mode, use the ./btguard-btcanary.txt
  * Output:
-        [COMPLAIN] TIME: 1573791101s 	 BackTrace: 0x400c23 0x4010fb 0x7f15e25cd830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [+] NEW
-        [COMPLAIN] TIME: 1573791108s 	 BackTrace: 0x400c23 0x4010fb 0x7f1a1d74b830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
-        [COMPLAIN] TIME: 1573791112s 	 BackTrace: 0x400c23 0x4010fb 0x7f6caf268830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
-        [COMPLAIN] TIME: 1573791132s 	 BackTrace: 0x400c23 0x4010fb 0x7f96af439830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
-        [RESTRICT] TIME: 1573791138s 	 BackTrace: 0x400c23 0x4010fb 0x7f0bec6de830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
-        [COMPLAIN] TIME: 1573791151s 	 BackTrace: 0x400c23 0x4010fb 0x7faf038ba830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
-        [RESTRICT] TIME: 1573791162s 	 BackTrace: 0x400c23 0x4010fb 0x7fd03933f830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
-        [COMPLAIN] TIME: 1573791175s 	 BackTrace: 0x400c23 0x4010fb 0x7f19932ea830 0x4009e9 (nil) 	 BT_CANARY: 0x1f37 	 [=] NUM 0
+        [COMPLAIN] TIME: 1573805426s 	 BackTrace: 0x400c4a 0x401120 0x7fe0a0287830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [+] NEW 0
+        [COMPLAIN] TIME: 1573805442s 	 BackTrace: 0x400c4a 0x401120 0x7fec5531e830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [=] NUM 0
+        [RESTRICT] TIME: 1573805461s 	 BackTrace: 0x400c4a 0x401120 0x7f69b8a94830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [=] NUM 0
+        [RESTRICT] TIME: 1573805468s 	 BackTrace: 0x400c4a 0x401120 0x7fba5598f830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [=] NUM 0
+        [COMPLAIN] TIME: 1573805473s 	 BackTrace: 0x400c4a 0x401120 0x7f49d1b00830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [=] NUM 0
+ * Notice:
+        1. comment printf() for /bin/bash, as it may output some errors.
  * */
 
 #include <stdio.h>
@@ -31,12 +30,15 @@
 #include <unistd.h>     // open() read() write()   
 #include <dlfcn.h>      // dlopen() dlsym()
 #include <sys/time.h>   // gettimeofday()
+#include <errno.h>
 
-
-#define BT_BUF_SIZE 50
+#define _GNU_SOURCE
+#define BT_BUF_SIZE 1024
 #define MAX_BT_CANARY_NUM 8192
-#define BT_CANARY_NAME "bt-canary.txt"
-#define LOG_NAME "bt-canary.log"
+#define BT_CANARY_NAME "btcanary.txt"
+#define LOG_NAME "btcanary.log"
+
+extern char *program_invocation_short_name;
 
 typedef int(*EXECVE)(const char*filename, char *const argv[], char *const envp[]);
 
@@ -70,12 +72,12 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     env = getenv("MODE");
     if (env)
         env_mode = atoi(env);        //  complain 0 restrict 1
-    pwd = getenv("PWD");
+    pwd = getenv("PWD"); //getenv("PWD");
     // printf("pwd %s\n", getenv("PWD"));
     memset(buffer, 0, BT_BUF_SIZE*sizeof(void *));
     backtrace((void *)buffer, BT_BUF_SIZE);                              // backtrace
-    sprintf(log_filename, "%s/%s", pwd, BT_CANARY_NAME);
-    // printf("filename %s\n", log_filename);
+    sprintf(log_filename, "%s/%s-%s", pwd, program_invocation_short_name, BT_CANARY_NAME);
+    // printf("log_filename %s\n", log_filename);                      // comment this when used for bash
     
 
     //get bt canary                                                    // create if not exists
@@ -94,7 +96,8 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     struct timeval tv;
     int log_fd;
 
-    sprintf(log_name, "%s/%s", pwd, LOG_NAME);                      
+    sprintf(log_name, "%s/%s-%s", pwd, program_invocation_short_name, LOG_NAME);
+    // printf("log_name %s\n", log_name);                                           // comment this when used for bash..
     log_fd = open(log_name, O_CREAT | O_RDWR | O_APPEND, S_IRWXU);  // open log_fd
 
 
@@ -153,6 +156,7 @@ END:
     // record args if needed...
     // sprintf(log,"EXECVE function invoked. filename: s1=<%s> \n", filename);
     // write(log_fd, log, strlen(log)); 
+    // printf("s1=<%s>\n", filename);
 
     old_execve(filename, argv, envp);
 
