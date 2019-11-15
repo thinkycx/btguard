@@ -9,7 +9,7 @@
  * Test:
  *      comment dlopen dlsym functions.. and 
         gcc btguard.c -o btguard -ldl
-        MODE=0 ./btguard    // COMPLAIN mode, output: ./btgurad-btcanary.txt
+        MODE=0 ./btguard    // COMPLAIN mode, output: ./btguard-btcanary.txt
         MODE=1 ./btguard    // RESTRICT mode, use the ./btguard-btcanary.txt
  * Output:
         [COMPLAIN] TIME: 1573805426s 	 BackTrace: 0x400c4a 0x401120 0x7fe0a0287830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [+] NEW 0
@@ -33,8 +33,8 @@
 #include <errno.h>
 
 #define _GNU_SOURCE
-#define BT_BUF_SIZE 1024
-#define MAX_BT_CANARY_NUM 8192
+#define MAX_BT_DEPTH 1024
+#define MAX_BT_UNIQUE_CANARY 8192
 #define BT_CANARY_NAME "btcanary.txt"
 #define LOG_NAME "btcanary.log"
 
@@ -64,7 +64,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     }
     
     char *pwd;                                                          // caculate the bt cannary                         
-    long long buffer[BT_BUF_SIZE];
+    long long buffer[MAX_BT_DEPTH];
     long long bt_canary;
     char log_filename[255];
     int env_mode;
@@ -74,18 +74,18 @@ int execve(const char* filename, char *const argv[], char *const envp[])
         env_mode = atoi(env);        //  complain 0 restrict 1
     pwd = getenv("PWD"); //getenv("PWD");
     // printf("pwd %s\n", getenv("PWD"));
-    memset(buffer, 0, BT_BUF_SIZE*sizeof(void *));
-    backtrace((void *)buffer, BT_BUF_SIZE);                              // backtrace
+    memset(buffer, 0, MAX_BT_DEPTH*sizeof(void *));
+    backtrace((void *)buffer, MAX_BT_DEPTH);                              // backtrace
     sprintf(log_filename, "%s/%s-%s", pwd, program_invocation_short_name, BT_CANARY_NAME);
     // printf("log_filename %s\n", log_filename);                      // comment this when used for bash
     
 
     //get bt canary                                                    // create if not exists
     int fd = open(log_filename, O_CREAT | O_RDWR | O_APPEND, S_IRWXU); // mode = 00700 ; user (file owner) has read, write, and execute permissions
-    long long bt_canary_array[MAX_BT_CANARY_NUM] = {0};
+    long long bt_canary_array[MAX_BT_UNIQUE_CANARY] = {0};
     int filesize;
     filesize = get_file_size(log_filename);
-    if( filesize > MAX_BT_CANARY_NUM*sizeof(void *) ){
+    if( filesize > MAX_BT_UNIQUE_CANARY*sizeof(void *) ){
         printf("filesize is too long...\n");
         return -1;
     }
@@ -115,7 +115,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     write(log_fd, log, strlen(log));
 
     // sum backtrace
-    for(int i=0; i<BT_BUF_SIZE; i++){                           // get each addr in the backtrace
+    for(int i=0; i<MAX_BT_DEPTH; i++){                           // get each addr in the backtrace
         // printf("%p\n", (void *)buffer[i]);      
         sprintf(log, "%p ", (void *)buffer[i]);       
         write(log_fd, log, strlen(log)); 
