@@ -33,7 +33,7 @@
 #include <sys/time.h>   // gettimeofday()
 
 
-#define BT_BUF_SIZE 20
+#define BT_BUF_SIZE 50
 #define MAX_BT_CANARY_NUM 8192
 #define BT_CANARY_NAME "bt-canary.txt"
 #define LOG_NAME "bt-canary.log"
@@ -129,7 +129,8 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     write(log_fd, log, strlen(log)); 
 
     // check whether the bt_canary is unique?
-    for(int i=0; bt_canary_array[i] != 0; i++ ){
+    int i=0; 
+    for(;bt_canary_array[i] != 0; i++ ){
         if (bt_canary_array[i] == bt_canary){
                 sprintf(log,"\t [=] NUM %d \n", i );    
                 write(log_fd, log, strlen(log)); 
@@ -138,7 +139,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     }
     // NOT EQUALS! get new bt_canary!
     if (env_mode == 0){
-        sprintf(log,"\t [+] NEW \n");
+        sprintf(log,"\t [+] NEW %d \n", i );
         write(log_fd, log, strlen(log)); 
 
         write(fd, &bt_canary, 8);                   // write new canary into the file.
