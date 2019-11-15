@@ -9,8 +9,8 @@
  * Test:
  *      comment dlopen dlsym functions.. and 
         gcc btguard.c -o btguard -ldl
-        MODE=0 ./btguard    // COMPLAIN mode, output: ./btguard-btcanary.txt
-        MODE=1 ./btguard    // RESTRICT mode, use the ./btguard-btcanary.txt
+        MODE=0 ./btguard    // COMPLAIN mode, output: ./btguard-<func>-btcanary.txt
+        MODE=1 ./btguard    // RESTRICT mode, use the ./btguard-<func>-btcanary.txt
  * Output:
         [COMPLAIN] TIME: 1573805426s 	 BackTrace: 0x400c4a 0x401120 0x7fe0a0287830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [+] NEW 0
         [COMPLAIN] TIME: 1573805442s 	 BackTrace: 0x400c4a 0x401120 0x7fec5531e830 0x400a29 (nil) 	 BT_CANARY: 0x1fc3 	 [=] NUM 0
@@ -20,6 +20,7 @@
  * Notice:
         1. comment printf() for /bin/bash, as it may output some errors.
  * */
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <execinfo.h>   // backtrace()
@@ -27,20 +28,18 @@
 #include <stdlib.h>
 #include <sys/stat.h>   // get_file_size()
 #include <string.h>
-#include <unistd.h>     // open() read() write()   
+#include <unistd.h>     // open() read() write() execve()  
 #include <dlfcn.h>      // dlopen() dlsym()
 #include <sys/time.h>   // gettimeofday()
 #include <errno.h>
+#include <sys/mman.h>   // mmap
 
-#define _GNU_SOURCE
 #define MAX_BT_DEPTH 1024
 #define MAX_BT_UNIQUE_CANARY 8192
 #define BT_CANARY_NAME "btcanary.txt"
 #define LOG_NAME "btcanary.log"
 
 extern char *program_invocation_short_name;
-
-typedef int(*EXECVE)(const char*filename, char *const argv[], char *const envp[]);
 
 unsigned long get_file_size(const char *path)
 {
@@ -54,14 +53,14 @@ unsigned long get_file_size(const char *path)
 	return filesize;
 }
 
-int execve(const char* filename, char *const argv[], char *const envp[])
+int hook(const char *funcname)
 {
-    static void *handle = NULL;                                         // hook execve function
-    static EXECVE old_execve = NULL;
-    if( !handle ){
-        handle = dlopen("libc.so.6", RTLD_LAZY);
-        old_execve = (EXECVE)dlsym(handle, "execve");
-    }
+    // static void *handle = NULL;                                         // hook execve function
+    // static EXECVE old_execve = NULL;
+    // if( !handle ){
+    //     handle = dlopen("libc.so.6", RTLD_LAZY);
+    //     old_execve = (EXECVE)dlsym(handle, "execve");
+    // }
     
     char *pwd;                                                          // caculate the bt cannary                         
     long long buffer[MAX_BT_DEPTH];
@@ -76,7 +75,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     // printf("pwd %s\n", getenv("PWD"));
     memset(buffer, 0, MAX_BT_DEPTH*sizeof(void *));
     backtrace((void *)buffer, MAX_BT_DEPTH);                              // backtrace
-    sprintf(log_filename, "%s/%s-%s", pwd, program_invocation_short_name, BT_CANARY_NAME);
+    sprintf(log_filename, "%s/%s-%s-%s", pwd, program_invocation_short_name, funcname, BT_CANARY_NAME);
     // printf("log_filename %s\n", log_filename);                      // comment this when used for bash
     
 
@@ -96,7 +95,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     struct timeval tv;
     int log_fd;
 
-    sprintf(log_name, "%s/%s-%s", pwd, program_invocation_short_name, LOG_NAME);
+    sprintf(log_name, "%s/%s-%s-%s", pwd, program_invocation_short_name, funcname, LOG_NAME);
     // printf("log_name %s\n", log_name);                                           // comment this when used for bash..
     log_fd = open(log_name, O_CREAT | O_RDWR | O_APPEND, S_IRWXU);  // open log_fd
 
@@ -153,17 +152,50 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     }
 
 END:
+    close(fd);
+    close(log_fd);
+}
+
+
+
+// start to hook functions
+// typedef int(*EXECVE)(const char*filename, char *const argv[], char *const envp[]);
+int (*original_execve)(const char*filename, char *const argv[], char *const envp[]);
+int (*original_mprotect)(void *addr, size_t len, int prot);
+void (*original_mmap)(void *addr, size_t length, int prot, int flags,
+                  int fd, off_t offset);
+
+__attribute__((constructor)) void btguard_orig()
+{
+    original_execve = dlsym(RTLD_NEXT, "execve");
+    original_mprotect = dlsym(RTLD_NEXT, "mprotect");
+    original_mmap = dlsym(RTLD_NEXT, "mmap");
+
+}
+
+int execve(const char* filename, char *const argv[], char *const envp[])
+{
     // record args if needed...
     // sprintf(log,"EXECVE function invoked. filename: s1=<%s> \n", filename);
     // write(log_fd, log, strlen(log)); 
-    // printf("s1=<%s>\n", filename);
-
-    old_execve(filename, argv, envp);
-
-    close(fd);
-    close(log_fd);
-
+    printf("*[execve] %s : arg1=<%s>\n", __func__, filename);
+    hook("execve");
+    original_execve(filename, argv, envp);
     return 0;
+}
+
+
+int mprotect(void *addr, size_t len, int prot)
+{
+    hook("mprotect");
+    original_mprotect(addr, len, prot);
+}
+
+void *mmap(void *addr, size_t length, int prot, int flags,
+                  int fd, off_t offset)
+{
+    hook("mmap");
+    original_mmap(addr, length, prot, flags, fd, offset);
 }
 
 void main()
@@ -173,6 +205,19 @@ void main()
     char **env;
     argv = NULL;
     env = NULL;
+
+    // test mmap
+    size_t pagesize = getpagesize();
+    printf("System page size: %zu bytes\n", pagesize);
+    char * region = mmap(
+        (void*) (pagesize * (1 << 20)),   // Map from the start of the 2^20th page
+        pagesize,                         // for one page length
+        PROT_READ|PROT_WRITE|PROT_EXEC,
+        MAP_ANON|MAP_PRIVATE,            // to a private block of hardware memory
+        0, 
+        pagesize);
+
+    // test execve
     execve(filename, argv, env);
 }
 
