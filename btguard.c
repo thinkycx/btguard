@@ -178,7 +178,7 @@ int execve(const char* filename, char *const argv[], char *const envp[])
     // record args if needed...
     // sprintf(log,"EXECVE function invoked. filename: s1=<%s> \n", filename);
     // write(log_fd, log, strlen(log)); 
-    printf("*[execve] %s : arg1=<%s>\n", __func__, filename);
+    // printf("*[execve] %s : arg1=<%s>\n", __func__, filename);
     hook("execve");
     original_execve(filename, argv, envp);
     return 0;
