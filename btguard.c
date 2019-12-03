@@ -89,9 +89,9 @@ int hook(const char *original_func_name)
     char log_filepath[255];
     struct timeval log_timeval;
 
-    long long backtrace_buffer[MAX_BT_DEPTH];
-    long long bt_canary_array[MAX_BT_UNIQUE_CANARY] = {0};
-    long long bt_canary;
+    unsigned long long backtrace_buffer[MAX_BT_DEPTH] = {0};                // should initial
+    unsigned long long bt_canary_array[MAX_BT_UNIQUE_CANARY] = {0};
+    unsigned long long bt_canary = 0;                                       // should initial
 
     char btcanary_filepath[255];
     signed int btcanary_filesize;           // -1 means not exists
@@ -151,7 +151,8 @@ int hook(const char *original_func_name)
         sprintf(log_info, "%p ", (void *)backtrace_buffer[i]);       
         write(log_fd, log_info, strlen(log_info));                          // [log] write each backtrace pointer
         backtrace_buffer[i] = backtrace_buffer[i] & 0xfff;                  // get the last 3 bit
-        bt_canary = bt_canary*0x100 + backtrace_buffer[i]; 
+        bt_canary = bt_canary + backtrace_buffer[i];                        // original has bug here, cause of not initial to bt_canary.
+        // printf("backtrace_buffer[%d] 0x%llx now bt_canary 0x%llx\n", i, backtrace_buffer[i], bt_canary);
         if (backtrace_buffer[i] == 0){
             break;
         }
@@ -244,10 +245,10 @@ void func_patcher(char *original_func_name, void *proxy_func)
     
     if ((long long )addr < 0x100000000){                        // jmp from libc.so to .text 
         // mov rax,0x400000c; jmp rax; 
-        // "\x48\xc7\xc0\x00\x10\x40\x00\xff\xe0"
-        memcpy(jmp_shellcode, "\x48\xc7", 2);       
-        memcpy(jmp_shellcode+2, &addr, 4);
-        memcpy(jmp_shellcode+6,  "\xff\xe0", 2);                // jmp rax
+        // "\x48\xc7\xc0\x0c\x00\x00\x04\xff\xe0"
+        memcpy(jmp_shellcode, "\x48\xc7\xc0", 3);       
+        memcpy(jmp_shellcode+3, &addr, 4);
+        memcpy(jmp_shellcode+7,  "\xff\xe0", 2);                // jmp rax
     }else{                                                      // jmp from libc.so to btguard.so 
         // mov rax,0x12345678aabbccdd; jmp rax;
         // "\x48\xb8\xdd\xcc\xbb\xaa\x78\x56\x34\x12\xff\xe0"
@@ -309,7 +310,9 @@ void addr_patcher(void *addr, char* shellcode ,int len){
  *        - [3] restore registers needed
  *        - [4] restore and call original first (N asm code), len(N asm code) >=12  // N=3 for execve
  *        - [5] jmp back to original execve()+ nbytes(= N asm code) in libc.so      // nbytes=13 for execve
-
+ * RETURN VALUE
+            On success, execve() does not return, on error -1 is returned, and errno is set appropriately.
+ 
     pwndbg> x/7i execve                                                    # execve in glibc
     0x7ffff7ad9770 <execve>:	mov    eax,0x3b
     0x7ffff7ad9775 <execve+5>:	syscall
@@ -389,6 +392,9 @@ int execve(const char* filename, char *const argv[], char *const envp[])
  *           - same as execve()
  *           - Notice: when mprotect() return value is not 0, perror() output maybe wrong. low priority.
  * 
+ * RETURN VALUE
+       On success, mprotect() returns zero.  On error, -1 is returned, and errno is set appropriately.
+
  pwndbg> x/10i mprotect
    0x7ffff790a770 <mprotect>:	mov    eax,0xa
    0x7ffff790a775 <mprotect+5>:	syscall
@@ -451,6 +457,17 @@ int mprotect(void *addr, size_t len, int prot)
 
         return;     // ignore the return value, has put into the %%rax;
 
+    }else{                                                                // invalid call
+        __asm__ __volatile__ (
+            // [3] restore the original registers for mprotect: rdx rsi rdi
+            "  pop %%rdx\n"
+            "  pop %%rsi\n"
+            "  pop %%rdi\n"
+        :
+        :
+        :"memory", "rsi", "rdi", "rax", "rbx", "rcx", "rdx"
+        );
+        return -1;
     }
 }
 
@@ -458,7 +475,13 @@ int mprotect(void *addr, size_t len, int prot)
  * mmap - proxy of the mmap() in libc.so, mmap() in btguard.so.
  *      - same as execve()
  *      - Notice: As first N asm code in mmap has "push", you should patch last "pop" asm code. 
- * 
+ * RETURN VALUE
+       On success, mmap() returns a pointer to the mapped area.  On error, the value MAP_FAILED (that is, (void *) -1) is returned,
+       and errno is set to indicate the cause of the error.
+
+       On success, munmap() returns 0.  On failure, it returns -1, and errno is set to indicate the cause of the error (probably to
+       EINVAL).
+       
 pwndbg> x/10i 0x7ffff7706680
    0x7ffff7706680 <__mmap>:	test   rdi,rdi
    0x7ffff7706683 <__mmap+3>:	push   r15              // 1 push
@@ -538,6 +561,18 @@ void *mmap(void *addr, size_t length, int prot, int flags,
         );
         return mmap_result;
 
+    }else{
+        __asm__ __volatile__ (                                              // invalid mmap call
+            "  pop %%rcx\n"
+            "  pop %%r14\n"
+            "  pop %%r9\n"
+            "  pop %%r15\n"
+            "  pop %%rdi\n"
+            :
+            :
+            :"memory", "rsi", "rdi", "rax", "rbx", "rcx", "rdx"
+        );
+        return (void *)-1;
     }
 }
 
